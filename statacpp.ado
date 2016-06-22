@@ -50,6 +50,12 @@ Notes:
 		we only use g++
 		only numeric variables get written out
 		returned data is passed via a do-file, but we could choose other formats too for dumping
+		the user has to include somewhere in their int main() comments like this:
+			// send global <globallist>
+			// send matrix <matrixlist>
+			// send var <varlist>
+			They do not have to be together but there should only be one (or none)
+				of each. There should be no tabs or spaces before the //. 
 	
 	non-existent globals and matrices, and non-numeric globals, get quietly ignored
 	missing values are removed casewise by default
@@ -78,6 +84,10 @@ Notes:
 */
 
 local statacppversion="0.1"
+local foundSends=0 // these are flags for writing outputfile later
+local sendMatrix=0
+local sendVar=0
+local sendGlobal=0
 
 // display version 
 dis as result "StataCpp version: `statacppversion'"
@@ -229,14 +239,32 @@ else {
 	! cp "`codefile'" "`cppf0'"
 }
 file open `cppf' using "`codefile'" , write replace
-file write `cppf' "#include<vector>" _n // required header, no harm if duplicated by user
+// required headers, no harm if duplicated by user
+file write `cppf' "#include <iostream>" _n 
+file write `cppf' "#include<array>" _n 
+file write `cppf' "#include<vector>" _n 
+file write `cppf' "#include <fstream>" _n 
+file write `cppf' "#include <sstream>" _n 
+file write `cppf' "using std::cout;" _n 
+file write `cppf' "using std::endl;" _n 
+file write `cppf' "using std::array;" _n 
+file write `cppf' "using std::vector;" _n 
+file write `cppf' "using std::ifstream;" _n 
+file write `cppf' "using std::ofstream;" _n 
+
 file open `cppf0h' using "`cppf0'", read 
 file read `cppf0h' line
 while (substr("`line'",1,8)!="int main" & !r(eof)) {
 	file write `cppf' `"`macval(line)'"' _n
 	file read `cppf0h' line
 }
-if !r(eof) {
+if r(eof) {
+	dis as error "Start of the main function not found in `cppfile'. This should be a line starting: int main"
+	capture file close `cppf'
+	capture file close `cppf0h'
+	error 1
+}
+else {
 	file write `cppf' "`line'" _n // write the "int main() {" line
 	// write data into cppfile
 	// first, write out the data in Stata's memory
@@ -372,21 +400,71 @@ if !r(eof) {
 			}
 		}
 	}
-// carry on reading cppf0h and copying into cppf
+	
+// carry on reading cppf0h and copying into cppf but look out for "// send ..."
 	file read `cppf0h' line
 	while (substr("`line'",1,8)!="int main" & !r(eof)) {
-		file write `cppf' `"`macval(line)'"' _n
-		file read `cppf0h' line
+		if substr(`"`macval(line)'"',1,14)=="// send global" {
+			// we will store these as a list of objects to write into a do-file
+			local foundSends=1
+			local sendGlobal=substr(`"`macval(line)'"',16,.)
+		}
+		if substr(`"`macval(line)'"',1,14)=="// send matrix" {
+			local foundSends=1
+			local sendMatrix=substr(`"`macval(line)'"',16,.)
+		}
+		if substr(`"`macval(line)'"',1,11)=="// send var" {
+			local foundSends=1
+			local sendVar=substr(`"`macval(line)'"',13,.)
+		}
+	// before writing rerturn statements, write the code to send back to Stata
+	if substr(`"`macval(line)'"',1,6)=="return" {
+		if `foundSends'==1 {
+			file write `cppf' "ofstream wfile;" _n
+			file write `cppf' `"`wfile.open("`outputfile'",ofstream::out);'"' _n
+		}
+		// write sendVar
+		if "`sendVar'"!="" {
+			foreach v in `sendVar' {
+				file write `cppf' `"wfile << "input `v'" << endl;"' _n
+				file write `cppf' "for(int i=0; i<=(`v'.size()-1); i++) {" _n
+				file write `cppf' "wfile << `v'[i] << endl;" _n
+				file write `cppf' "}" _n
+				file write `cppf' `"wfile << "end" << endl;"' _n
+			}
+		}
+		// write sendMatrix
+		if "`sendMatrix'"!="" {
+			foreach v in `sendMatrix' {
+				file write `cppf' `"wfile << "input `v'" << endl;"' _n
+				file write `cppf' "for(int i=0; i<=(`v'.size()-1); i++) {" _n
+				file write `cppf' "wfile << `v'[i] << endl;" _n
+				file write `cppf' "}" _n
+				file write `cppf' `"wfile << "end" << endl;"' _n
+			}
+		}
+		// write sendGlobal
+		if "`sendGlobal'"!="" {
+			foreach v in `sendGlobal' {
+				file write `cppf' `"wfile << "input `v'" << endl;"' _n
+				file write `cppf' "for(int i=0; i<=(`v'.size()-1); i++) {" _n
+				file write `cppf' "wfile << `v'[i] << endl;" _n
+				file write `cppf' "}" _n
+				file write `cppf' `"wfile << "end" << endl;"' _n
+			}
+		}
+		// close outputfile
+		if `foundSends'==1 {
+			file write `cppf' "wfile.close();" _n
+		}
+
 	}
-}
-else {
-	dis as error "Start of the main function not found in `cppfile'. This should be a line starting: int main"
+	file write `cppf' `"`macval(line)'"' _n
+	file read `cppf0h' line
+	}
+
 	capture file close `cppf'
 	capture file close `cppf0h'
-	error 1
-}
-capture file close `cppf'
-capture file close `cppf0h'
 }
 if lower("$S_OS")=="windows" {
 	! del "`cppf0'"
@@ -397,405 +475,45 @@ else {
 
 
 restore
-end
-/*
+
+}
 
 
 
-/*#############################################################
-######################## Windows code #########################
-#############################################################*/
+// Windows commands
 if lower("$S_OS")=="windows" {
-	// unless re-running an existing compiled executable, move model to cmdstandir
-	if "`rerun'"!="rerun" {
-		// check if modelfile already exists in cdir
-		capture confirm file "`cdir'\\`modelfile'"
-		if !_rc {
-			// check they are different before copying and compiling
-			tempfile working
-			shell fc /lb2 "`wdir'\\`modelfile'" "`cdir'\\`modelfile'" > "`working'"
-			// if different shell copy "`wdir'\\`modelfile'" "`cdir'\\`modelfile'"
-		}
-		else {
-			windowsmonitor, command(copy "`wdir'\\`modelfile'" "`cdir'\\`modelfile'") ///
-				winlogfile(`winlogfile') waitsecs(30)
-		}
-	}
-	else {
-		windowsmonitor, command(copy "`wdir'\\`execfile'" "`cdir'\\`execfile'") ///
+	// compile
+	windowsmonitor, command(g++ "`codefile'" -o "`execfile'" -std=c++0x) ///
 			winlogfile(`winlogfile') waitsecs(30)
-	}
+			
+	// run
+	windowsmonitor, command("`execfile'") winlogfile(`winlogfile') waitsecs(30)
+}
 
-	! copy "`cdir'\`winlogfile'" "`wdir'\winlog1"
-	cd "`cdir'"
+
+// Linux / Mac commands
+else {
+	// compile
+	shell g++ "`codefile'" -o "`execfile'" -std=c++0x
 	
-	if "`rerun'"=="" {
-		dis as result "###############################"
-		dis as result "###  Output from compiling  ###"
-		dis as result "###############################"
-		windowsmonitor, command(make "`execfile'") winlogfile(`winlogfile') waitsecs(30)
-	}
-	! copy `cdir'\`winlogfile' `wdir'
-	! copy "`cdir'\`cppfile'" "`wdir'\`cppfile'"
-	! copy "`cdir'\`execfile'" "`wdir'\`execfile'"
+	// run
+	shell ./"`execfile'"
+}
 
-	dis as result "##############################"
-	dis as result "###  Output from sampling  ###"
-	dis as result "##############################"
 
-	if `chains'==1 {
-		windowsmonitor, command(`cdir'\\`execfile' method=sample `warmcom' `itercom' `thincom' `seedcom' algorithm=hmc `stepcom' `stepjcom' output file="`wdir'\\`outputfile'.csv" data file="`wdir'\\`datafile'") ///
-			winlogfile(`winlogfile') waitsecs(30)
-	}
-	else {
-		windowsmonitor, command(for /l %%x in (1,1,`chains') do start /b /w `cdir'\\`execfile' id=%%x random `seedcom' method=sample `warmcom' `itercom' `thincom' algorithm=hmc `stepcom' `stepjcom' output file="`wdir'\\`outputfile'%%x.csv" data file="`wdir'\\`datafile'") ///
-			winlogfile(`winlogfile') waitsecs(30)
-	}
-	! copy "`cdir'\`winlogfile'" "`wdir'\winlog3"
-	! copy "`cdir'\`outputfile'*.csv" "`wdir'\`outputfile'*.csv"
+		
 
-	windowsmonitor, command(bin\stansummary.exe "`wdir'\\`outputfile'*.csv") winlogfile(`winlogfile') waitsecs(30)
+// do the outputfile to get the results in
+do "`outputfile'"
 
-	// reduce csv file
-	if `chains'==1 {
-		file open ofile using "`wdir'\\`outputfile'.csv", read
-		file open rfile using "`wdir'\\`chainfile'", write text replace
-		capture noisily {
-			file read ofile oline
-			while r(eof)==0 {
-				if length("`oline'")!=0 {
-					local firstchar=substr("`oline'",1,1)
-					if "`firstchar'"!="#" {
-						file write rfile "`oline'" _n
-					}
-				}
-				file read ofile oline
-			}
-		}
-		file close ofile
-		file close rfile
-	}
-	else {
-		local headerline=1 // flags up when writing the variable names in the header
-		file open ofile using "`wdir'\\`outputfile'1.csv", read
-		file open rfile using "`wdir'\\`chainfile'", write text replace
-		capture noisily {
-			file read ofile oline
-			while r(eof)==0 {
-				if length("`oline'")!=0 {
-					local firstchar=substr("`oline'",1,1)
-					if "`firstchar'"!="#" {
-						if `headerline'==1 {
-							file write rfile "`oline',chain" _n
-							local headerline=0
-						}
-						else {
-							file write rfile "`oline',1" _n
-						}
-					}
-				}
-				file read ofile oline
-			}
-		}
-		file close ofile
-		forvalues i=2/`chains' {
-			file open ofile using "`wdir'\\`outputfile'`i'.csv", read
-			capture noisily {
-				file read ofile oline
-				while r(eof)==0 {
-					if length("`oline'")!=0 {
-						local firstchar=substr("`oline'",1,1)
-						// skip comments and (because these are chains 2-n)
-						// the variable names (which always start with lp__)
-						if "`firstchar'"!="#" & "`firstchar'"!="l" {
-							file write rfile "`oline',`i'" _n
-						}
-					}
-					file read ofile oline
-				}
-			}
-			file close ofile
-		}
-		file close rfile
-	}
-
-	if "`mode'"=="mode" {
-		dis as result "#############################################"
-		dis as result "###  Output from optimizing to find mode  ###"
-		dis as result "#############################################"
-		windowsmonitor, command(`cdir'\\`execfile' optimize data file="`wdir'\\`datafile'" output file="`wdir'\\`outputfile'.csv") ///
-			winlogfile(`winlogfile') waitsecs(30)
-
-		// extract mode and lp__ from output.csv
-		file open ofile using "`wdir'\\`outputfile'.csv", read
-		file open mfile using "`wdir'\\`modesfile'", write text replace
-		capture noisily {
-			file read ofile oline
-			while r(eof)==0 {
-				if length("`oline'")!=0 {
-					local firstchar=substr("`oline'",1,1)
-					if "`firstchar'"!="#" {
-						file write mfile "`oline'" _n
-					}
-				}
-				file read ofile oline
-			}
-		}
-		file close ofile
-		file close mfile
-		preserve
-			insheet using "`wdir'\\`modesfile'", comma names clear
-			local lp=lp__[1]
-			dis as result "Log-probability at maximum: `lp'"
-			drop lp__
-			xpose, clear varname
-			qui count
-			local npars=r(N)
-			forvalues i=1/`npars' {
-				local parname=_varname[`i']
-				label define parlab `i' "`parname'", add
-			}
-			encode _varname, gen(Parameter) label(parlab)
-			gen str14 Posterior="Mode"
-			tabdisp Parameter Posterior, cell(v1) cellwidth(9) left
-		restore
-	}
-
-	if "`diagnose'"=="diagnose" {
-		dis as result "#################################"
-		dis as result "###  Output from diagnostics  ###"
-		dis as result "#################################"
-		windowsmonitor, command(`cdir'\\`execfile' diagnose data file="`wdir'\\`datafile'") ///
-			winlogfile("`wdir'\\`winlogfile'") waitsecs(30)
-	}
-
-	// tidy up files
+// tidy up files
+if lower("$S_OS")=="windows" {
 	!del "`winlogfile'"
 	!del "wmbatch.bat"
-	!del "`modelfile'"
-	!copy "`cppfile'" "`wdir'\\`cppfile'"
-	!copy "`execfile'" "`wdir'\\`execfile'"
-	if "`keepfiles'"=="" {
-		!del "`wdir'\\`winlogfile'"
-		!del "`wdir'\\wmbatch.bat"
-		!del "`wdir'\\`outputfile'*.csv"
-	}
-	!del "`cdir'\\`cppfile'"
-	!del "`cdir'\\`execfile'"
-
-	cd "`wdir'"
 }
-
-/*#######################################################
-#################### Linux / Mac code ###################
-#######################################################*/
 else {
-	// unless re-running an existing compiled executable, move model to cmdstandir
-	if "`rerun'"!="rerun" {
-		// check if modelfile already exists in cdir
-		capture confirm file "`cdir'/`modelfile'"
-		if !_rc {
-			// check they are different before copying and compiling
-			tempfile working
-			shell diff -b "`wdir'/`modelfile'" "`cdir'/`modelfile'" > "`working'"
-			tempname wrk
-			file open `wrk' using "`working'", read text
-			file read `wrk' line
-			if "`line'" !="" {
-				shell cp "`wdir'/`modelfile'" "`cdir'/`modelfile'"
-			}
-		}
-		else {
-			shell cp "`wdir'/`modelfile'" "`cdir'/`modelfile'"
-		}
-		shell cp "`wdir'/`modelfile'" "`cdir'/`modelfile'"
-	}
-	else {
-		shell cp "`wdir'/`execfile'" "`cdir'/`execfile'"
-	}
-	cd "`cdir'"
-	
-	if "`rerun'"=="" {
-		dis as result "###############################"
-		dis as result "###  Output from compiling  ###"
-		dis as result "###############################"
-		shell make "`execfile'"
-		// leave modelfile in cdir so make can check need to re-compile
-		// shell rm "`cdir'/`modelfile'"
-	}
-	
-	dis as result "##############################"
-	dis as result "###  Output from sampling  ###"
-	dis as result "##############################"
-	if `chains'==1 {
-		shell ./`execfile' random `seedcom' method=sample `warmcom' `itercom' `thincom' algorithm=hmc `stepcom' `stepjcom' output file="`wdir'/`outputfile'.csv" data file="`wdir'/`datafile'"
-	}
-	else {
-		shell for i in {1..`chains'}; do ./`execfile' id=\$i random `seedcom' method=sample `warmcom' `itercom' `thincom' algorithm=hmc `stepcom' `stepjcom' output file="`wdir'/`outputfile'\$i.csv" data file="`wdir'/`datafile'" & done
-	}
-	shell bin/stansummary "`wdir'/`outputfile'*.csv"
-
-	// reduce csv file
-	if `chains'==1 {
-		file open ofile using "`wdir'/`outputfile'.csv", read
-		file open rfile using "`wdir'/`chainfile'", write text replace
-		capture noisily {
-			file read ofile oline
-			while r(eof)==0 {
-				if length("`oline'")!=0 {
-					local firstchar=substr("`oline'",1,1)
-					if "`firstchar'"!="#" {
-						file write rfile "`oline'" _n
-					}
-				}
-				file read ofile oline
-			}
-		}
-		file close ofile
-		file close rfile
-	}
-	else {
-		local headerline=1 // flags up when writing the variable names in the header
-		file open ofile using "`wdir'/`outputfile'1.csv", read
-		file open rfile using "`wdir'/`chainfile'", write text replace
-		capture noisily {
-			file read ofile oline
-			while r(eof)==0 {
-				if length("`oline'")!=0 {
-					local firstchar=substr("`oline'",1,1)
-					if "`firstchar'"!="#" {
-						if `headerline'==1 {
-							file write rfile "`oline',chain" _n
-							local headerline=0
-						}
-						else {
-							file write rfile "`oline',1" _n
-						}
-					}
-				}
-				file read ofile oline
-			}
-		}
-		file close ofile
-		forvalues i=2/`chains' {
-			file open ofile using "`wdir'/`outputfile'`i'.csv", read
-			capture noisily {
-				file read ofile oline
-				while r(eof)==0 {
-					if length("`oline'")!=0 {
-						local firstchar=substr("`oline'",1,1)
-						// skip comments and (because these are chains 2-n)
-						// the variable names (which always start with lp__)
-						if "`firstchar'"!="#" & "`firstchar'"!="l" {
-							file write rfile "`oline',`i'" _n
-						}
-					}
-					file read ofile oline
-				}
-			}
-			file close ofile
-		}
-		file close rfile
-	}
-
-	if "`mode'"=="mode" {
-		dis as result "#############################################"
-		dis as result "###  Output from optimizing to find mode  ###"
-		dis as result "#############################################"
-		shell "`cdir'/`execfile'" optimize data file="`wdir'/`datafile'" output file="`wdir'/`outputfile'.csv"
-		// extract mode and lp__ from output.csv
-		file open ofile using "`wdir'/`outputfile'.csv", read
-		file open mfile using "`wdir'/`modesfile'", write text replace
-		capture noisily {
-			file read ofile oline
-			while r(eof)==0 {
-				if length("`oline'")!=0 {
-					local firstchar=substr("`oline'",1,1)
-					if "`firstchar'"!="#" {
-						file write mfile "`oline'" _n
-					}
-				}
-				file read ofile oline
-			}
-		}
-		file close ofile
-		file close mfile
-		preserve
-			insheet using "`wdir'/`modesfile'", comma names clear
-			local lp=lp__[1]
-			dis as result "Log-probability at maximum: `lp'"
-			drop lp__
-			xpose, clear varname
-			qui count
-			local npars=r(N)
-			forvalues i=1/`npars' {
-				local parname=_varname[`i']
-				label define parlab `i' "`parname'", add
-			}
-			encode _varname, gen(Parameter) label(parlab)
-			gen str14 Posterior="Mode"
-			tabdisp Parameter Posterior, cell(v1) cellwidth(9) left
-		restore
-	}
-	if "`diagnose'"=="diagnose" {
-		dis as result "#################################"
-		dis as result "###  Output from diagnostics  ###"
-		dis as result "#################################"
-		shell "`cdir'/`execfile'" diagnose data file="`wdir'/`datafile'"
-	}
-
-		// tidy up files
 	!rm "`winlogfile'"
 	!rm "wmbatch.bat"
-	!rm "`modelfile'"
-	!cp "`cppfile'" "`wdir'/`cppfile'"
-	!cp "`execfile'" "`wdir'/`execfile'"
-	if "`keepfiles'"=="" {
-		!rm "`wdir'/`outputfile'.csv"
-	}
-	!rm "`cdir'/`cppfile'"
-	!rm "`cdir'/`execfile'"
-
-
-	cd "`wdir'"
 }
-
-if "`load'"=="load" {
-	dis as result "############################################"
-	dis as result "###  Now loading Stan output into Stata  ###"
-	dis as result "############################################"
-	// read in output and tabulate
-	insheet using "`chainfile'", comma names clear
-	qui ds
-	local allvars=r(varlist)
-	gettoken v1 vn: allvars, parse(" ")
-	while "`v1'"!="n_divergent__" {
-		gettoken v1 vn: vn, parse(" ")
-	}
-	tabstat `vn', stat(n mean sd semean min p1 p5 p25 p50 p75 p95 p99)
-	foreach v of local vn {
-		qui centile `v', c(2.5 97.5)
-		local cent025_`v'=r(c_1)
-		local cent975_`v'=r(c_2)
-		dis as result "95% CI for `v': `cent025_`v'' to `cent975_`v''"
-	}
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-		
-		
-		
-		
-		
 end
+
