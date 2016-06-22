@@ -1,17 +1,23 @@
 capture program drop statacpp
 
-/* 	modelfile -> codefile
+/* 	changes from StataStan (stan.ado):
+	modelfile -> codefile
 	removed options: datafile, rerun, initsfile, load, diagnose, modesfile, chainfile,
 		seed, chains, warmup, iter, thin, cmdstandir, mode, stepsize, stepsizejitter
 	added options: standard
 	
-	output.csv -> output.R
+	output.csv -> output.do
 	
 	modelfile had 5-character extension like .stan but codefile has 4 like .cpp
 	
 	no need for wdir and cdir
 	
 	writing data is now inside an if!r(eof) loop 
+	
+	missing data are not allowed in Stan, so that was never a consideration, but 
+		now we have to guard against them.
+	
+	matrices in R/S+ are read down the columns first, but in C++ are along the rows first.
 */
 
 program define statacpp
@@ -23,7 +29,7 @@ syntax varlist [if] [in] [, CODEfile(string) ///
 
 /* options:
 	codefile: name of C++ code file (that you have already saved)
-		(following John Thompson's lead, if modelfile=="", then look for
+		(following John Thompson's lead, if codefile=="", then look for
 		a comment block in your do-file that begins with a line:
 		"C++" and this will be written out as the model (omitting the 1st line)
 	inline: read in the model from a comment block in this do-file
@@ -31,9 +37,9 @@ syntax varlist [if] [in] [, CODEfile(string) ///
 		current active do-file, used to locate the code inline. If
 		thisfile is omitted, Stata will look at the most recent SD*
 		file in c(tmpdir)
-	outputfile: name of file to contain output from executable in R/S+ format
+	outputfile: name of do-file to contain output from executable 
 	winlogfile: in Windows, where to store stdout & stderr before displaying on the screen
-	skipmissing: omit missing values variablewise to Stan (caution required!!!)
+	skipmissing: omit missing values variablewise (caution required!!!)
 	matrices: list of matrices to write, or 'all'
 	globals: list of global macro names to write, or 'all'
 	keepfiles: if stated, all files generated are kept in the working directory; if not,
@@ -43,11 +49,32 @@ Notes:
 	As of version 0.1 (these things will be extended later): 
 		we only use g++
 		only numeric variables get written out
+		returned data is passed via a do-file, but we could choose other formats too for dumping
 	
 	non-existent globals and matrices, and non-numeric globals, get quietly ignored
 	missing values are removed casewise by default
 	users need to take care not to leave output file names as defaults if they
 		have anything called output.csv etc. - these will be overwritten!
+		
+	#include<vector> is written to all pre-processor directives, and we could add others
+	
+	variables (in the Stata sense) get written as vectors, globals as atomic 
+		variables (in the C++ sense), matrices get written as arrays. It is up to the 
+		user to convert vectors to arrays if they have a use for that.
+	
+	Only numeric data is written at present, string data will follow, and then dates (maybe!).
+	C++ types int and double get utilised. Again, it is up to the user to convert in their 
+		C++ code if they have reason to do so. globals and matrices are always written as double.
+		If you want to get around this and have ints instead, save them as variables in the data
+		with type int (in Stata) and then use the skipmissing option (although you may have to pad out 
+		missing data in the
+	
+	g++ is the only compiler supported at present, and C++0x standard is required. We hope 
+		to add more compilers, and will try to keep the standard as low as possible.
+		
+	we assume the codefile has a 4-character file extension like ".cpp" or ".cxx" or
+	".hpp" and chop the last 4 chars off to make the execfile name
+
 */
 
 local statacppversion="0.1"
@@ -59,10 +86,8 @@ dis as result "StataCpp version: `statacppversion'"
 if "`codefile'"=="" {
 	local modelfile="statacpp.cpp"
 }
-/* we assume the codefile has a 4-character file extension like ".cpp" or ".cxx" or
-	".hpp" will chop the last 4 chars off to make the execfile name */
 
-// this holds the entered name but .R will be appended later
+// this holds the entered name but .do will be appended later
 if "`outputfile'"=="" {
 	local outputfile="output"
 }
@@ -83,15 +108,15 @@ if lower("$S_OS")=="windows" {
 // check for existing files
 tempfile outputcheck
 if lower("$S_OS")=="windows" {
-	shell if exist "`outputfile'*.R" (echo yes) else (echo no) >> "`outputcheck'"
+	shell if exist "`outputfile'*.do" (echo yes) else (echo no) >> "`outputcheck'"
 }
 else {
-	shell test -e "`outputfile'*.R" && echo "yes" || echo "no" >> "`outputcheck'"
+	shell test -e "`outputfile'*.do" && echo "yes" || echo "no" >> "`outputcheck'"
 }
 file open oc using "`outputcheck'", read
 file read oc ocline
 if "`ocline'"=="yes" {
-	dis as error "There are already one or more files called `outputfile'*.R"
+	dis as error "There are already one or more files called `outputfile'*.do"
 	dis as error "These may be overwritten by statacpp or incorrectly read back into Stata."
 	dis as error "Please rename or move them, or specify a different name in the outputfile option to avoid data loss or errors."
 	error 1
@@ -284,46 +309,53 @@ if !r(eof) {
 				if `mrow'==1 { // row matrix: write as vector
 					if `mcol'==1 { // special case of 1x1 matrix: write as scalar
 						local mval=`mat'[1,1]
-						file write `cppf' "`mat' <- `mval'" _n
+						file write `cppf' "double `mat' = `mval';" _n
 					}
 					else {
-						file write `cppf' "`mat' <- c("
+						file write `cppf' "std::vector <double> `mat' = {"
 						local mcolminusone=`mcol'-1
 						forvalues i=1/`mcolminusone' {
 							local mval=`mat'[1,`i']
 							file write `cppf' "`mval',"
 						}
 						local mval=`mat'[1,`mcol']
-						file write `cppf' "`mval')" _n
+						file write `cppf' "`mval'};" _n
 					}
 				}
 				else if `mcol'==1 & `mrow'>1 { // column matrix: write as vector
-					file write `cppf' "`mat' <- c("
+					file write `cppf' "std::vector <double> `mat' = {"
 					local mrowminusone=`mrow'-1
 					forvalues i=1/`mrowminusone' {
 						local mval=`mat'[`i',1]
 						file write `cppf' "`mval',"
 					}
 					local mval=`mat'[`mrow',1]
-					file write `cppf' "`mval')" _n
+					file write `cppf' "`mval'};" _n
 				}
-				else { // otherwise, write as matrix
-					file write `cppf' "`mat' <- structure(c("
+				else { // otherwise, write as matrix (rows first)
+					file write `cppf' "double `mat'[`mrow'][`mcol'] = {"
 					local mrowminusone=`mrow'-1
 					local mcolminusone=`mcol'-1
-					forvalues j=1/`mcolminusone' {
-						forvalues i=1/`mrow' {
+					// write each row
+					forvalues i=1/`mrowminusone' {
+						file write `cppf' " { "
+						forvalues j=1/`mcolminusone' {
 							local mval=`mat'[`i',`j']
 							file write `cppf' "`mval',"
 						}
-					}
-					forvalues i=1/`mrowminusone' { // write final column
+						// write last cell in that row
 						local mval=`mat'[`i',`mcol']
+						file write `cppf' "`mval' }, "						
+					}
+					// write final row
+					file write `cppf' " { "
+					forvalues j=1/`mcolminusone' { 
+						local mval=`mat'[`mrow',`j']
 						file write `cppf' "`mval',"
 					}
 					// write final cell
 					local mval=`mat'[`mrow',`mcol']
-					file write `cppf' "`mval'), .Dim=c(`mrow',`mcol'))"
+					file write `cppf' "`mval' } };" _n
 				}
 			}
 		}
@@ -366,6 +398,9 @@ else {
 
 restore
 end
+/*
+
+
 
 /*#############################################################
 ######################## Windows code #########################
@@ -746,4 +781,21 @@ if "`load'"=="load" {
 	}
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+		
+		
+		
+		
+		
 end
