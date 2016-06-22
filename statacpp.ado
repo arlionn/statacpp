@@ -204,6 +204,7 @@ else {
 	! cp "`codefile'" "`cppf0'"
 }
 file open `cppf' using "`codefile'" , write replace
+file write `cppf' "#include<vector>" _n // required header, no harm if duplicated by user
 file open `cppf0h' using "`cppf0'", read 
 file read `cppf0h' line
 while (substr("`line'",1,8)!="int main" & !r(eof)) {
@@ -229,7 +230,7 @@ if !r(eof) {
 		qui count if `v'!=.
 		local nthisvar=r(N)
 		if `nthisvar'>1 {
-			file write `cppf' "`vtype' `v'[] = {"
+			file write `cppf' "std::vector <`vtype'> `v' = {"
 			if "`skipmissing'"=="skipmissing" {
 				local nlines=0
 				local i=1
@@ -335,7 +336,7 @@ if !r(eof) {
 		foreach g in `globals' {
 			capture confirm number ${`g'}
 			if !_rc {
-				file write `cppf' "`g' <- ${`g'}" _n
+				file write `cppf' "double `g' = ${`g'};" _n
 			}
 		}
 	}

@@ -1,21 +1,26 @@
 // test run for statacpp
 
 clear all
-set obs 10
-gen x=_n
+sysuse auto
+global myglob=123
+
+// Opondo method
+statacpp mpg, codefile
+
+! rm myprog.cpp
+
+// pre-written C++ file
+statacpp mpg, codefile("myprog.cpp") globals("myglob")
+
+
+// Thompson method
 
 /* C++
 
 */
 
-// Opondo method
-statacpp x, codefile
 
-! rm myprog.cpp
 
-// pre-written C++ file
-
-// Thompson method
 
 // Grant method
 
