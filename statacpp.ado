@@ -1,5 +1,10 @@
 capture program drop statacpp
 
+/*
+	Issues:
+	outputcheck fails, echoing to stdout, if outputfile exists
+*/
+
 /* 	changes from StataStan (stan.ado):
 	modelfile -> codefile
 	removed options: datafile, rerun, initsfile, load, diagnose, modesfile, chainfile,
@@ -460,15 +465,34 @@ else {
 			}
 		}
 		// write sendMatrix
+		// at present this assumes all matrices are arrays of doubles
 		if "`sendMatrix'"!="" {
+				file write `cppf' "int ncells; int ncols; int nrows;" _n
 			foreach v in `sendMatrix' {
-				file write `cppf' `"wfile << "input `v'" << endl;"' _n
-				file write `cppf' "for(int i=0; i<=(`v'.size()-1); i++) {" _n
-				file write `cppf' "wfile << `v'[i] << endl;" _n
+				file write `cppf' "ncells = sizeof(`v')/sizeof(double);" _n
+				file write `cppf' "ncols = sizeof(`v'[0])/sizeof(double);" _n
+				file write `cppf' "nrows = ncells/ncols;" _n
+				file write `cppf' `"wfile << "matrix `v' = [";"' _n
+				file write `cppf' "for(int i=0; i<nrows; i++) {" _n
+				file write `cppf' "for(int j=0; j<ncols; j++) {" _n
+				file write `cppf' `"wfile << `v'[i][j];"' _n
+				file write `cppf' `"if(j<(ncols-1)) { wfile << ", "; }"'
 				file write `cppf' "}" _n
-				file write `cppf' `"wfile << "end" << endl;"' _n
+				file write `cppf' `"if(i<(nrows-1)) { wfile << " \\ "; }"'
+				file write `cppf' "}" _n
+				file write `cppf' `"wfile << "]" << endl;"' _n
+//wfile << "matrix mymat = [";
+//for(int i=0; i<nrows; i++) {
+//for(int j=0; j<ncols; j++) {
+//wfile << mymat[i][j];
+//if(j<(ncols-1)) { wfile << ", "; }
+//}
+//if(i<(nrows-1)) { wfile << " \\ "; }
+//}
+//wfile << "]" << endl;
+
 			}
-		}
+		}		
 		// write sendGlobal
 		if "`sendGlobal'"!="" {
 			foreach v in `sendGlobal' {
@@ -530,16 +554,20 @@ else {
 		
 
 // do the outputfile to get the results in
-do "`outputfile'"
+qui do "`outputfile'"
 
 // tidy up files
 if lower("$S_OS")=="windows" {
-	!del "`winlogfile'"
-	!del "wmbatch.bat"
+	quietly {
+		!del "`winlogfile'"
+		!del "wmbatch.bat"
+	}
 }
 else {
-	!rm "`winlogfile'"
-	!rm "wmbatch.bat"
+	quietly {
+		!rm "`winlogfile'"
+		!rm "wmbatch.bat"
+	}
 }
 end
 
