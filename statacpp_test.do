@@ -1,28 +1,42 @@
 // test run for statacpp
 
 clear all
-do "C:\Users\ku52502\git\statacpp\statacpp.ado"
+do "~/git/statacpp/statacpp.ado"
 
-cd "C:\deleteme"
+cd "~/deleteme"
+! rm myprog.cpp
+! rm myprog
+
 sysuse auto
-global myglob=123
+global myglob=2
 mkmat weight length in 1/5, mat(mymat)
 
 // Opondo method
 tempname writecode
 file open `writecode' using "myprog.cpp", write replace
-// in contrast to StataStan, you will need semicolons, so don't use them as delimiters
+// note the compound double quotes (cf http://www.stata.com/statalist/archive/2012-08/msg00924.html)
 foreach line in ///
 		"int main () { " ///
-        `"cout << "Hello world"  << endl; "' ///
-		`"cout << "This is your global: " << myglob << endl;"' ///
+        `"cout << "Now running the Fuel Efficiency Boosterizer"  << endl; "' ///
+		`"cout << "We will now multiply mpg by: " << myglob << endl;"' ///
+		"std::vector <int> mpg2 = mpg;" ///
+		"for(int i=0;i<mpg.size();i++) {" ///
+		"mpg2[i] = mpg[i]*myglob;" ///
+		"}" ///
+		"// send var mpg2" ///
+		"return 0;" ///
 		"}" {
-	file write `writecode' `"`line'"' _n // note the compound double quotes (cf http://www.stata.com/statalist/archive/2012-08/msg00924.html)
+	// note the compound double quotes (cf http://www.stata.com/statalist/archive/2012-08/msg00924.html)
+	file write `writecode' `"`line'"' _n 
 }
 file close `writecode'
 
 
 statacpp mpg, codefile("myprog.cpp") globals("myglob") matrices("mymat")
+
+matrix A = [1,2,3 \ 4,5,6]
+matrix list A
+
 
 ! rm myprog.cpp
 

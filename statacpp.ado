@@ -103,7 +103,7 @@ if "`codefile'"=="" {
 }
 
 if "`outputfile'"=="" {
-	local outputfile="output" // this holds the entered name but .do will be appended later
+	local outputfile="output.do" 
 }
 
 if "`winlogfile'"=="" {
@@ -140,15 +140,15 @@ else {
 // check for existing files
 tempfile outputcheck
 if lower("$S_OS")=="windows" {
-	shell if exist "`outputfile'*.do" (echo yes) else (echo no) >> "`outputcheck'"
+	shell if exist "`outputfile'" (echo yes) else (echo no) >> "`outputcheck'"
 }
 else {
-	shell test -e "`outputfile'*.do" && echo "yes" || echo "no" >> "`outputcheck'"
+	shell test -e "`outputfile'" && echo "yes" || echo "no" >> "`outputcheck'"
 }
 file open oc using "`outputcheck'", read
 file read oc ocline
 if "`ocline'"=="yes" {
-	dis as error "There are already one or more files called `outputfile'*.do"
+	dis as error "There are already one or more do-files called `outputfile'"
 	dis as error "These may be overwritten by statacpp or incorrectly read back into Stata."
 	dis as error "Please rename or move them, or specify a different name in the outputfile option to avoid data loss or errors."
 	capture file close oc
@@ -431,20 +431,23 @@ else {
 			// we will store these as a list of objects to write into a do-file
 			local foundSends=1
 			local sendGlobal=substr(`"`macval(line)'"',16,.)
+			dis as result "Attempting to return global(s) called `sendGlobal' to Stata"
 		}
 		if substr(`"`macval(line)'"',1,14)=="// send matrix" {
 			local foundSends=1
 			local sendMatrix=substr(`"`macval(line)'"',16,.)
+			dis as result "Attempting to return matrix or matrices called `sendMatrix' to Stata"
 		}
 		if substr(`"`macval(line)'"',1,11)=="// send var" {
 			local foundSends=1
 			local sendVar=substr(`"`macval(line)'"',13,.)
+			dis as result "Attempting to return var(s) called `sendVar' to Stata"
 		}
-	// before writing rerturn statements, write the code to send back to Stata
+	// before writing return statements, write the code to send back to Stata
 	if substr(`"`macval(line)'"',1,6)=="return" {
 		if `foundSends'==1 {
 			file write `cppf' "ofstream wfile;" _n
-			file write `cppf' `"`wfile.open("`outputfile'",ofstream::out);'"' _n
+			file write `cppf' `"wfile.open("`outputfile'",ofstream::out);"' _n
 		}
 		// write sendVar
 		if "`sendVar'"!="" {
@@ -453,7 +456,7 @@ else {
 				file write `cppf' "for(int i=0; i<=(`v'.size()-1); i++) {" _n
 				file write `cppf' "wfile << `v'[i] << endl;" _n
 				file write `cppf' "}" _n
-				file write `cppf' `"wfile << "end" << endl;"' _n
+				//file write `cppf' `"wfile << "end" << endl;"' _n
 			}
 		}
 		// write sendMatrix
@@ -506,7 +509,7 @@ restore
 // Windows commands
 if lower("$S_OS")=="windows" {
 	// compile
-	windowsmonitor, command(g++ "`codefile'" -o "`execfile'" -std=c++0x) ///
+	windowsmonitor, command(g++ "`codefile'" -o "`execfile'" `standard') ///
 			winlogfile(`winlogfile') waitsecs(30)
 			
 	// run
@@ -517,7 +520,7 @@ if lower("$S_OS")=="windows" {
 // Linux / Mac commands
 else {
 	// compile
-	shell g++ "`codefile'" -o "`execfile'" -std=c++0x
+	shell g++ "`codefile'" -o "`execfile'" `standard'
 	
 	// run
 	shell ./"`execfile'"
