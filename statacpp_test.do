@@ -13,7 +13,7 @@ tempname writecode
 file open `writecode' using "myprog.cpp", write replace
 // in contrast to StataStan, you will need semicolons, so don't use them as delimiters
 foreach line in ///
-		"int main { " ///
+		"int main () { " ///
         `"cout << "Hello world"  << endl; "' ///
 		`"cout << "This is your global: " << myglob << endl;"' ///
 		"}" {
