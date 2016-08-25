@@ -23,7 +23,7 @@ capture program drop statacpp
 program define statacpp
 version 11.0
 syntax varlist [if] [in] [, CODEfile(string) ///
-	INLINE THISFILE(string) STANDARD(integer 3) ///
+	INLINE THISFILE(string) STANDARD(string) ///
 	OUTPUTfile(string) WINLOGfile(string) ///
 	SKipmissing MATrices(string) GLobals(string) KEEPFiles]
 
@@ -37,6 +37,9 @@ syntax varlist [if] [in] [, CODEfile(string) ///
 		current active do-file, used to locate the code inline. If
 		thisfile is omitted, Stata will look at the most recent SD*
 		file in c(tmpdir)
+	standard: a string indicating the C++ standard to pass to the compiler. This has 
+		to be one of: "98", "03", "11", "14", "gnu98", "gnu11" or "gnu14" (which are the
+		g++ options, minus c++17 / c++1z)
 	outputfile: name of do-file to contain output from executable 
 	winlogfile: in Windows, where to store stdout & stderr before displaying on the screen
 	skipmissing: omit missing values variablewise (caution required!!!)
@@ -66,7 +69,7 @@ Notes:
 	
 	variables (in the Stata sense) get written as vectors, globals as atomic 
 		variables (in the C++ sense), matrices get written as arrays. It is up to the 
-		user to convert vectors to arrays if they have a use for that.
+		user to convert vectors to arrays inside the C++ code if they have a use for that.
 	
 	Only numeric data is written at present, string data will follow, and then dates (maybe!).
 	C++ types int and double get utilised. Again, it is up to the user to convert in their 
@@ -84,10 +87,12 @@ Notes:
 */
 
 local statacppversion="0.1"
-local foundSends=0 // these are flags for writing outputfile later
-local sendMatrix=0
-local sendVar=0
-local sendGlobal=0
+local foundSends=0 // binary flag for writing outputfile later
+
+// these will hold names of objects to return to Stata
+local sendMatrix "" 
+local sendVar ""
+local sendGlobal ""
 
 // display version 
 dis as result "StataCpp version: `statacppversion'"
@@ -97,9 +102,8 @@ if "`codefile'"=="" {
 	local modelfile="statacpp.cpp"
 }
 
-// this holds the entered name but .do will be appended later
 if "`outputfile'"=="" {
-	local outputfile="output"
+	local outputfile="output" // this holds the entered name but .do will be appended later
 }
 
 if "`winlogfile'"=="" {
@@ -112,8 +116,26 @@ if lower("$S_OS")=="windows" {
 	local execfile="`deleteme'"+".exe"
 }
 
+if "`standard'"=="" {
+	local standard "03"
+}
+
+if "`standard'"!="98" & "`standard'"!="03" & "`standard'"!="11" ///
+	 & "`standard'"!="14" & "`standard'"!="gnu98" & "`standard'"!="gnu11" ///
+	  & "`standard'"!="gnu14" {
+		dis as error "standard option must be one of 98, 03, 11, 14, gnu98, gnu11 or gnu14"
+		error 1
+}
+
 // strings to insert into shell command
-// need to add the standard here, maybe other stuff too
+if length("`standard'")==5 {
+	local stdtemp = substr("`standard'",4,2)
+	local standard = "-std=gnu++`stdtemp'"
+}
+else {
+	local standard = "-std=c++`standard'"
+}
+
 
 // check for existing files
 tempfile outputcheck
@@ -129,16 +151,17 @@ if "`ocline'"=="yes" {
 	dis as error "There are already one or more files called `outputfile'*.do"
 	dis as error "These may be overwritten by statacpp or incorrectly read back into Stata."
 	dis as error "Please rename or move them, or specify a different name in the outputfile option to avoid data loss or errors."
+	capture file close oc
 	error 1
 }
-file close oc
+capture file close oc
 
 preserve
 if "`if'"!="" | "`in'"!="" {
 	keep `if' `in'
 }
 
-// drop missing data casewise
+// drop missing data casewise ########### THIS PROBABLY NEEDS TO BE REMOVED ###########
 if "`skipmissing'"!="skipmissing" {
 	foreach v of local varlist {
 		qui count if `v'!=.
@@ -151,7 +174,7 @@ if "`skipmissing'"!="skipmissing" {
 // the capture block ensures the file handles are closed at the end, no matter what
 capture noisily {
 
-// inline (John Thompson's approach) model written to .stan file
+// inline (John Thompson's approach) model written to .cpp file
 if "`inline'"!="" {
 	tempname fin
 	tempfile tdirls
@@ -229,8 +252,8 @@ if "`inline'"!="" {
 
 
 // find location in cppfile to write data
-tempname cppf // the handle for the codefile to keep and use
-tempname cppf0 // a copy of it without data
+tempname cppf // the handle for the codefile, to keep and use
+tempfile cppf0 // a copy of it without data
 tempname cppf0h // the handle for the copy without data
 if lower("$S_OS")=="windows" {
 	! copy "`codefile'" "`cppf0'"
@@ -296,7 +319,7 @@ else {
 						local linedata=`v'[`i']
 					}
 					else if `linedata'!=. & `nlines'==(`nthisvar'-1) {
-						file write `cppf' "`linedata')" _n
+						file write `cppf' "`linedata'}" _n
 						local ++nlines
 					}
 
