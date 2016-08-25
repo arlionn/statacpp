@@ -83,8 +83,10 @@ Notes:
 		with type int (in Stata) and then use the skipmissing option (although you may have to pad out 
 		missing data in the
 	
-	g++ is the only compiler supported at present, and C++0x standard is required. We hope 
-		to add more compilers, and will try to keep the standard as low as possible.
+	g++ is the only compiler supported at present, and C++11 standard is required. That's how I roll, 
+		but I hope other fans of Stata and C++ will contribute on GitHub to add more compilers, 
+		and I will try to keep the standard as low as possible (as in 0x, 11, 14..., not as in quality 
+		of the work).
 		
 	we assume the codefile has a 4-character file extension like ".cpp" or ".cxx" or
 	".hpp" and chop the last 4 chars off to make the execfile name
@@ -122,7 +124,7 @@ if lower("$S_OS")=="windows" {
 }
 
 if "`standard'"=="" {
-	local standard "03"
+	local standard "11"
 }
 
 if "`standard'"!="98" & "`standard'"!="03" & "`standard'"!="11" ///
