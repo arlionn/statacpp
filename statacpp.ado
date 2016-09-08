@@ -27,7 +27,7 @@ capture program drop statacpp
 
 program define statacpp
 version 11.0
-syntax varlist [if] [in] [, CODEfile(string) ///
+syntax [varlist] [if] [in] [, CODEfile(string) ///
 	INLINE THISFILE(string) STANDARD(string) ///
 	OUTPUTfile(string) WINLOGfile(string) ///
 	SKipmissing MATrices(string) GLobals(string) KEEPFiles]
@@ -299,6 +299,7 @@ else {
 	// write data into cppfile
 	// first, write out the data in Stata's memory
 	// this can only cope with scalars (n=1) and vectors; matrices & globals are named in the option
+	if "`varlist'"!="" {
 	foreach v of local varlist {
 		// determine variable type and allocate corresponding C++ type
 		confirm numeric variable `v'
@@ -352,6 +353,7 @@ else {
 			local linedata=`v'[1]
 			file write `cppf' "`v' <- `linedata'" _n
 		}
+	}
 	}
 
 	// write matrices
@@ -483,26 +485,12 @@ else {
 				file write `cppf' `"if(i<(nrows-1)) { wfile << " \\ "; }"'
 				file write `cppf' "}" _n
 				file write `cppf' `"wfile << "]" << endl;"' _n
-//wfile << "matrix mymat = [";
-//for(int i=0; i<nrows; i++) {
-//for(int j=0; j<ncols; j++) {
-//wfile << mymat[i][j];
-//if(j<(ncols-1)) { wfile << ", "; }
-//}
-//if(i<(nrows-1)) { wfile << " \\ "; }
-//}
-//wfile << "]" << endl;
-
 			}
 		}		
 		// write sendGlobal
 		if "`sendGlobal'"!="" {
 			foreach v in `sendGlobal' {
-				file write `cppf' `"wfile << "input `v'" << endl;"' _n
-				file write `cppf' "for(int i=0; i<=(`v'.size()-1); i++) {" _n
-				file write `cppf' "wfile << `v'[i] << endl;" _n
-				file write `cppf' "}" _n
-				file write `cppf' `"wfile << "end" << endl;"' _n
+				file write `cppf' `"wfile << "global `v' = " << `v' << endl;"' _n
 			}
 		}
 		// close outputfile
