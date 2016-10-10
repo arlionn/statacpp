@@ -28,6 +28,7 @@ capture program drop statacpp
 program define statacpp
 version 11.0
 syntax [varlist] [if] [in] [, CODEfile(string) ///
+	CPpargs(string) ///
 	INLINE THISFILE(string) STANDARD(string) ///
 	OUTPUTfile(string) WINLOGfile(string) ///
 	SKipmissing MATrices(string) GLobals(string) KEEPFiles]
@@ -54,8 +55,11 @@ syntax [varlist] [if] [in] [, CODEfile(string) ///
 		all are deleted except the C++ code and the executable.
 
 Notes:
-	As of version 0.1 (these things will be extended later): 
+	As of version 0.2 (these things will be extended later): 
 		we only use g++
+		I have no intention of testing this in, or tweaking it for, Windows. Feel free to 
+			contribute on GitHub. In theory it will work because it cannibalises StataStan 
+			code... but practice is often rather different.
 		only numeric variables get written out
 		returned data is passed via a do-file, but we could choose other formats too for dumping
 		the user has to include somewhere in their int main() comments like this:
@@ -64,6 +68,11 @@ Notes:
 			// send var <varlist>
 			They do not have to be together but there should only be one (or none)
 				of each. There should be no tabs or spaces before the //. 
+		Any cases with missing data in a Stata variable which is sent to C++ will be removed (unless
+			skipmissing is specified, in which case just that datum is removed, potentially making 
+			a ragged array of data, which is OK because each Stata variable is passed as its own vector.
+			If you really want to work with missing data in some way, you will have to code it in the
+			old-fashioned way as 999 or some such, and then process it as you see fit inside C++.
 	
 	non-existent globals and matrices, and non-numeric globals, get quietly ignored
 	missing values are removed casewise by default
@@ -93,7 +102,7 @@ Notes:
 
 */
 
-local statacppversion="0.1"
+local statacppversion="0.2"
 local foundSends=0 // binary flag for writing outputfile later
 
 // these will hold names of objects to return to Stata
@@ -168,7 +177,7 @@ if "`if'"!="" | "`in'"!="" {
 	keep `if' `in'
 }
 
-// drop missing data casewise ########### THIS PROBABLY NEEDS TO BE REMOVED ###########
+// drop missing data casewise 
 if "`skipmissing'"!="skipmissing" {
 	foreach v of local varlist {
 		qui count if `v'!=.
@@ -233,7 +242,8 @@ if "`inline'"!="" {
 	local line1=`"`1'"'
 	file read `fin' line
 	tokenize `"`line'"'
-	while (("`line1'"!="/*" | substr(`"`1'"',1,3)!="C++") & !r(eof)) {
+	// check for the start of the code block
+	while ((`"`line1'"'!="/*" | substr(`"`1'"',1,3)!="C++") & !r(eof)) {
 		local line1="`1'"
 		file read `fin' line
 		tokenize `"`line'"'
@@ -243,14 +253,20 @@ if "`inline'"!="" {
 		capture file close `fin'
 		error 1
 	}
-
+	// when the code block has been found:
+		// open a file to receive the C++
 	tempname fout
 	capture file close `fout'
 	file open `fout' using "`codefile'" , write replace
-	file write `fout' "`line'" _n
+		// move on one line in the do-file
+	local line1="`1'"
 	file read `fin' line
-	while ("`line'"!="*/") {
-		file write `fout' "`line'" _n
+	tokenize `"`line'"'
+		// write out the block
+	file write `fout' `"`line'"' _n
+	file read `fin' line
+	while (`"`line'"'!="*/") {
+		file write `fout' `"`line'"' _n
 		file read `fin' line
 	}
 	file close `fin'
@@ -284,7 +300,7 @@ file write `cppf' "using std::ofstream;" _n
 
 file open `cppf0h' using "`cppf0'", read 
 file read `cppf0h' line
-while (substr("`line'",1,8)!="int main" & !r(eof)) {
+while (substr(`"`line'"',1,8)!="int main" & !r(eof)) {
 	file write `cppf' `"`macval(line)'"' _n
 	file read `cppf0h' line
 }
@@ -295,7 +311,7 @@ if r(eof) {
 	error 1
 }
 else {
-	file write `cppf' "`line'" _n // write the "int main() {" line
+	file write `cppf' `"`line'"' _n // write the "int main() {" line
 	// write data into cppfile
 	// first, write out the data in Stata's memory
 	// this can only cope with scalars (n=1) and vectors; matrices & globals are named in the option
@@ -351,7 +367,7 @@ else {
 		}
 		else if `nthisvar'==1 {
 			local linedata=`v'[1]
-			file write `cppf' "`v' <- `linedata'" _n
+			file write `cppf' "`v' <- `linedata'" _n // NEEDS TO BE CORRECTED
 		}
 	}
 	}
@@ -435,7 +451,7 @@ else {
 	
 // carry on reading cppf0h and copying into cppf but look out for "// send ..."
 	file read `cppf0h' line
-	while (substr("`line'",1,8)!="int main" & !r(eof)) {
+	while (substr(`"`line'"',1,8)!="int main" & !r(eof)) {
 		if substr(`"`macval(line)'"',1,14)=="// send global" {
 			// we will store these as a list of objects to write into a do-file
 			local foundSends=1
@@ -527,7 +543,7 @@ if lower("$S_OS")=="windows" {
 			winlogfile(`winlogfile') waitsecs(30)
 			
 	// run
-	windowsmonitor, command("`execfile'") winlogfile(`winlogfile') waitsecs(30)
+	windowsmonitor, command("`execfile'" `cppargs') winlogfile(`winlogfile') waitsecs(30)
 }
 
 
@@ -537,14 +553,16 @@ else {
 	shell g++ "`codefile'" -o "`execfile'" `standard'
 	
 	// run
-	shell ./"`execfile'"
+	shell ./"`execfile'" `cppargs'
 }
 
 
 		
 
 // do the outputfile to get the results in
-qui do "`outputfile'"
+if `foundSends'==1 {
+	capture qui do "`outputfile'"
+}
 
 // tidy up files
 if lower("$S_OS")=="windows" {
