@@ -41,12 +41,12 @@ Other notes
   * only numeric variables get written out
   * returned data is passed via a do-file, but we could choose other formats too for dumping
   * the user has to include somewhere in their int main() comments like this:
-			```
+```
       // send global <globallist>
 			// send matrix <matrixlist>
 			// send var <varlist>
-      ```
-   They do not have to be together but there should only be one (or none) of each. There should be no tabs or spaces before the //.
+```
+   They do not have to be together but there should only be one (or none) of each. There should be no tabs or spaces before the `//`.
   * Any cases with missing data in a Stata variable which is sent to C++ will be removed (unless skipmissing is specified, in which case just that datum is removed, potentially making a ragged array of data, which is OK because each Stata variable is passed as its own vector. If you really want to work with missing data in some way, you will have to code it in the old-fashioned way as 999 or some such, and then process it as you see fit inside C++.
 * non-existent globals and matrices, and non-numeric globals, get quietly ignored
 * missing values are removed casewise by default
