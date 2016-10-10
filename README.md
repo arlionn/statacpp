@@ -1,9 +1,11 @@
 statacpp
 ========
 
-A Stata command to combine data with C++ code, compile and run it, and return the output into Stata.
+A Stata command to combine data with C++ code, compile and run it, and return the output into Stata. Run stuff faster, manipulate memory locations directly, parallelize on multiple CPU cores, tap into existing libraries, etc etc.
 
-At present, there is no help file, and it is not on SSC for download, but you can copy the .ado file into your local Stata ado folder.
+At present, there is no help file (I'll get there), and it is not on SSC for download (I might not), but you can copy the .ado file into your local Stata ado folder. GitHub uses https so you can't `net install` from here.
+
+The general philosophy here is that you need to look out for your own code. statacpp can't check the C++ bits for you (though you will see compiler messages that might be helpful in debugging), so proceed with caution. It won't check that what you send from Stata is compatible with what you expect in C++ either. Remember that you can do bad things to your computer with a lower-level language like this. statacpp contributors and I make this in out spare time, for fun, and we accept no responsibility for anything, ever.
 
 statacpp is built out of StataStan, which works fine in Windows. statacpp should work there too, but I don't test it. Windows is fundamentally different to Linux/ Mac in how it interacts with Stata, which complicates things. This is a Windows issue, not a Stata one.
 
@@ -14,6 +16,7 @@ statacpp [varlist, options]
 Options:
 --------
 codefile(filename): either where to find your .cpp file, or where to store the code that is inside the do-file
+cppargs(string): the arguments to pass to your compiled program when it is executed
 thisfile(filename): as for StataStan
 inline(filename): as for StataStan, scans the do-file for a comment block beginning
   /*
@@ -28,6 +31,27 @@ keepfiles: normally, we delete the interim files that clutter up your computer, 
 
 Other notes
 -----------
-Support for parallel chains and makefile is work in progress for version 0.2.
-
-Like StataStan, if you use the infile option, you can only read in the first code block that matches the required opening lines. That is on the to-do list for StataStan and will feed across to statacpp when it's done.
+* Support for parallel chains and makefile is work in progress for version 0.2.
+* Like StataStan, if you use the infile option, you can only read in the first code block that matches the required opening lines. That is on the to-do list for StataStan and will feed across to statacpp when it's done.
+* As of version 0.1 (these things will be extended later):
+  * we only use g++
+  * I have no intention of testing this in, or tweaking it for, Windows. Feel free to contribute on GitHub. In theory it will work because it cannibalises StataStan code... but practice is often rather different.
+  * only numeric variables get written out
+  * returned data is passed via a do-file, but we could choose other formats too for dumping
+  * the user has to include somewhere in their int main() comments like this:
+			```
+      // send global <globallist>
+			// send matrix <matrixlist>
+			// send var <varlist>
+      ```
+   They do not have to be together but there should only be one (or none) of each. There should be no tabs or spaces before the //.
+  * Any cases with missing data in a Stata variable which is sent to C++ will be removed (unless skipmissing is specified, in which case just that datum is removed, potentially making a ragged array of data, which is OK because each Stata variable is passed as its own vector. If you really want to work with missing data in some way, you will have to code it in the old-fashioned way as 999 or some such, and then process it as you see fit inside C++.
+* non-existent globals and matrices, and non-numeric globals, get quietly ignored
+* missing values are removed casewise by default
+* users need to take care not to leave output file names as defaults if they have anything called output.csv etc. - these will be overwritten!
+* `#include<vector>` is written to all pre-processor directives, and we could add others
+* variables (in the Stata sense) get written as vectors, globals as atomic variables (in the C++ sense), matrices get written as arrays. It is up to the user to convert vectors to arrays inside the C++ code if they have a use for that.
+* Only numeric data is written at present, string data will follow, and then dates (maybe!).
+* C++ types int and double get utilised. Again, it is up to the user to convert in their C++ code if they have reason to do so. globals and matrices are always written as double. If you want to get around this and have ints instead, save them as variables in the data with type int (in Stata) and then use the skipmissing option (but see above).
+* g++ is the only compiler supported at present, and C++11 standard is required. That's how I roll, but I hope other fans of Stata and C++ will contribute on GitHub to add more compilers, and I will try to keep the standard as low as possible (as in 0x, 11, 14..., not as in quality of the work).
+* we assume the codefile has a 4-character file extension like ".cpp" or ".cxx" or ".hpp" and chop the last 4 chars off to make the execfile name
