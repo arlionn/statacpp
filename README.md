@@ -71,7 +71,7 @@ Some car manufacturers have been known to use bespoke software to make their pro
 Example 1: NYC taxi data
 ====================
 
-![taxi journey heatmap](https://github.com/robertgrant/statacpp/raw/master/src/common/images/taxis.png)
+![taxi journey heatmap](https://github.com/robertgrant/statacpp/blob/master/taxis.png)
 
 This is a 'big data' example, using [Chris Whong's taxi data](http://chriswhong.com/open-data/foil_nyc_taxi/), which is details of every taxi journey in New York city in 2013. Uncompressed, there are 12 trip_data files (one for each month) of about 2.5GB each, and 12 trip_fare files of about 1.6GB each. These are generally too big to open in Stata, and although you could flip through them line-by-line using `file read` commands, it is always going to be faster to do that in as low-level a language as you can stomach. Probably the biggest single selling point, though, is being able to parcel up the 12 months into 12 threads (executing the compiled program 12 times), making full use of multicore CPUs. In this test case ("statacpp-taxi-example.do"), I get all 170 million journeys and MapReduce their start locations (from GPS in the taxi meters) to counts on a latitude-longitude grid, then plot that in Stata. On an "early 2015" MacBook Pro, with quad-core 2.7GHz Intel core i5 CPU, 8GB of RAM, Stata 14.1/SE, OS X El Capitan, g++ and statacpp 0.2, I can do all this in 641 seconds = 11 minutes. Booya! If I do it by the comparator do-file "taxi-stata.do" method, it takes an hour to go through 300,000 lines of the January file (which has about 1,400,000 lines), so the whole process should take about 56 hours: 315 times longer!
 
