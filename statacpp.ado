@@ -28,32 +28,12 @@ capture program drop statacpp
 program define statacpp
 version 11.0
 syntax [varlist] [if] [in] [, CODEfile(string) ///
-	CPpargs(string) ///
+	CPpargs(string) NCores(integer 1) PArallel(integer 1) ///
 	INLINE THISFILE(string) STANDARD(string) ///
 	OUTPUTfile(string) WINLOGfile(string) ///
 	SKipmissing MATrices(string) GLobals(string) KEEPFiles]
 
-/* options:
-	codefile: name of C++ code file (that you have already saved)
-		(following John Thompson's lead, if codefile=="", then look for
-		a comment block in your do-file that begins with a line:
-		"C++" and this will be written out as the model (omitting the 1st line)
-	inline: read in the model from a comment block in this do-file
-	thisfile: optional, to use with inline; gives the path and name of the
-		current active do-file, used to locate the code inline. If
-		thisfile is omitted, Stata will look at the most recent SD*
-		file in c(tmpdir)
-	standard: a string indicating the C++ standard to pass to the compiler. This has 
-		to be one of: "98", "03", "11", "14", "gnu98", "gnu11" or "gnu14" (which are the
-		g++ options, minus c++17 / c++1z)
-	outputfile: name of do-file to contain output from executable 
-	winlogfile: in Windows, where to store stdout & stderr before displaying on the screen
-	skipmissing: omit missing values variablewise (caution required!!!)
-	matrices: list of matrices to write, or 'all'
-	globals: list of global macro names to write, or 'all'
-	keepfiles: if stated, all files generated are kept in the working directory; if not,
-		all are deleted except the C++ code and the executable.
-
+/* 
 Notes:
 	As of version 0.2 (these things will be extended later): 
 		we only use g++
@@ -141,6 +121,11 @@ if "`standard'"!="98" & "`standard'"!="03" & "`standard'"!="11" ///
 	  & "`standard'"!="gnu14" {
 		dis as error "standard option must be one of 98, 03, 11, 14, gnu98, gnu11 or gnu14"
 		error 1
+}
+
+if `parallel'<1 {
+	dis as error "parallel option must have a positive integer"
+	error 1
 }
 
 // strings to insert into shell command
@@ -553,7 +538,12 @@ else {
 	shell g++ "`codefile'" -o "`execfile'" `standard'
 	
 	// run
-	shell ./"`execfile'" `cppargs'
+	if `parallel'==1 {
+		shell ./"`execfile'" `cppargs'
+	}
+	else {
+		shell for i in {1..`parallel'}; do "./`execfile'" \$i `cppargs' & done
+	}
 }
 
 

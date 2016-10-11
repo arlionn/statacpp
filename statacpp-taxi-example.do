@@ -4,6 +4,9 @@ cap ado uninstall block
 net install block
 */
 
+timer clear
+timer on 1
+
 do "~/git/statacpp/statacpp.ado"
 cd "~/NYC taxi data"
 
@@ -28,12 +31,16 @@ using std::ofstream;
 using std::stringstream;
 
 int main(int argc, char *argv[]) {
-  string filename = argv[1];
-  string results = argv[2];
+  stringstream sarg;
+  int k;
+  sarg << argv[1];
+  sarg >> k;
+  string sk = to_string(k);
+  string filename = argv[2]+sk+".csv";
+  string results = argv[3]+sk+".csv";
   int countevery = 100000;
-    if(argc>3) {
-	   stringstream sarg;
-       sarg << argv[3];
+    if(argc>4) {
+       sarg << argv[4];
        sarg >> countevery;
 	}
     string line;
@@ -124,11 +131,17 @@ int main(int argc, char *argv[]) {
 }
 */
 
-// run the binning for January
-statacpp, codefile("taxi-binning.cpp") cppargs("trip_data_1.csv bin_1.csv 100000") ///
-	inline thisfile("/Users/robert/git/statacpp/statacpp-taxi-example.do")
+// run the binning for each month
+statacpp, codefile("taxi-binning.cpp") cppargs("trip_data_ bin_ 100000") ///
+	inline thisfile("/Users/robert/git/statacpp/statacpp-taxi-example.do") ///
+	parallel(12)
+	
+	
 // read in the counts for a lat/long grid
-import delimited "bin_1.csv", delimiters(",") clear varnames(nonames) rowrange(2)
+tempfile allcounts
+
+forvalues k=1/12 {
+import delimited "bin_`k'.csv", delimiters(",") clear varnames(nonames) rowrange(2)
 
 replace v1 = v1/1000
 replace v2 = v2/1000
@@ -137,14 +150,28 @@ rename v1 latitude
 rename v2 longitude
 rename v3 count
 
-local split1 = 2
-local split2 = 5
-local split3 = 10
-local split4 = 20
-local split5 = 100
-local split6 = 200
-local split7 = 500
-local split8 = 1000
+if `k'==1 {
+	save "`allcounts'", replace
+}
+else {
+	rename count count2
+	merge 1:1 latitude longitude using "`allcounts'"
+	replace count=count+count2
+	drop count2
+	drop _merge
+	save "`allcounts'", replace
+}
+}
+
+local split1 = 4
+local split2 = 10
+local split3 = 40
+local split4 = 100
+local split5 = 400
+local split6 = 1000
+local split7 = 4000
+local split8 = 10000
+local split9 = 40000
 
 qui summ latitude
 local minlat=r(min)
@@ -154,14 +181,23 @@ local minlong=r(min)
 local maxlong=r(max)
 
 twoway (scatter latitude longitude if count<`split1', ///
-				msymbol(point) mcolor(gs15) ///
+				msymbol(point) mcolor(gs16) ///
 				yscale(range(`minlat' `maxlat')) ///
-				xscale(range(`minlong' `maxlong')) legend(off)) ///
-	   (scatter latitude longitude if count>=`split1' & count<`split2', msymbol(point) mcolor(gs13)) ///
-	   (scatter latitude longitude if count>=`split2' & count<`split3', msymbol(point) mcolor(gs11)) ///
-	   (scatter latitude longitude if count>=`split3' & count<`split4', msymbol(point) mcolor(gs9)) ///
-	   (scatter latitude longitude if count>=`split4' & count<`split5', msymbol(point) mcolor(gs8)) ///
-	   (scatter latitude longitude if count>=`split5' & count<`split6', msymbol(point) mcolor(gs6)) ///
-	   (scatter latitude longitude if count>=`split6' & count<`split7', msymbol(point) mcolor(gs4)) ///
-	   (scatter latitude longitude if count>=`split7' & count<`split8', msymbol(point) mcolor(gs2)) ///
-	   (scatter latitude longitude if count>=`split8' & count!=., msymbol(point) mcolor(black))
+				xscale(range(`minlong' `maxlong')) legend(off) ///
+				graphregion(color(white))) ///
+	   (scatter latitude longitude if count>=`split1' & count<`split2', msymbol(point) mcolor(gs15)) ///
+	   (scatter latitude longitude if count>=`split2' & count<`split3', msymbol(point) mcolor(gs13)) ///
+	   (scatter latitude longitude if count>=`split3' & count<`split4', msymbol(point) mcolor(gs11)) ///
+	   (scatter latitude longitude if count>=`split4' & count<`split5', msymbol(point) mcolor(gs10)) ///
+	   (scatter latitude longitude if count>=`split5' & count<`split6', msymbol(point) mcolor(gs8)) ///
+	   (scatter latitude longitude if count>=`split6' & count<`split7', msymbol(point) mcolor(gs6)) ///
+	   (scatter latitude longitude if count>=`split7' & count<`split8', msymbol(point) mcolor(gs4)) ///
+	   (scatter latitude longitude if count>=`split8' & count<`split9', msymbol(point) mcolor(gs3)) ///
+	   (scatter latitude longitude if count>=`split9' & count!=., msymbol(point) mcolor(black))
+graph export "taxis.png", replace
+
+save "nyc-taxis.dta", replace
+
+timer off 1
+timer list
+timer clear

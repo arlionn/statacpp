@@ -29,6 +29,11 @@ Options:
 * `skipmissing`: as for StataStan, a rather scary option that treats each variable as a vector, discarding any empty cells, so that they can have different lengths. Proceed with caution.
 * `matrices(string)`: a list of the names of Stata matrices that you want to pass into C++. You can also type `all`. These are treated as arrays of type double.
 * `globals(string)`: a list of the names of Stata global macros that you want to pass into C++. You can also type `all`. These are assumed to have type double in C++ so if you try to pass a string it will break. I'll think about that later though, because it could be useful.
+* `parallel(integer)`: specifies how many instances of the executable program to run. Your operating system is best placed to decide how to run these, but typically they will make good use of multicore CPUs. Specifying a number greater than the number of available cores will usually mean that some are queued, but the OS decides that. Default 1 (no parallelisation), and the number you give needs to be a positive integer. If `parallel` >1, then each instance is called with consecutive integers as the *first* argument, before anything you provide in `cppargs`, as if you had typed:
+```
+for i in {1..4}; do ./myprog $i argv2 argv3 argv4 & done
+```
+So, it is up to you to incorporate that first argument in your C++ code in order to loop over files, RNG seeds, vel sim.
 * `keepfiles`: normally, we delete the interim files that clutter up your computer, but if you want to look at them afterwards, include this option.
 
 Other notes
@@ -57,3 +62,20 @@ Other notes
 * C++ types int and double get utilised. Again, it is up to the user to convert in their C++ code if they have reason to do so. globals and matrices are always written as double. If you want to get around this and have ints instead, save them as variables in the data with type int (in Stata) and then use the skipmissing option (but see above).
 * g++ is the only compiler supported at present, and C++11 standard is required. That's how I roll, but I hope other fans of Stata and C++ will contribute on GitHub to add more compilers, and I will try to keep the standard as low as possible (as in 0x, 11, 14..., not as in quality of the work).
 * we assume the codefile has a 4-character file extension like ".cpp" or ".cxx" or ".hpp" and chop the last 4 chars off to make the execfile name
+
+Example 0: Fuel efficiency boosterizer
+=============================
+
+Some car manufacturers have been known to use bespoke software to make their products look better in tests than they really are. "statacpp_test.do" is a silly version of that. We take the venerable auto dataset, send the mpg variable to C++, where it is multiplied by a boosterization factor (2, in this case), and then fed back to Stata as a new variable called mpg2. To complete the demonstration, we also send a matrix `mymat` comprising the first 5 lines of the weight and length variables, and return the first row only as `mymat2`.
+
+Example 1: NYC taxi data
+====================
+
+![taxi journey heatmap](https://github.com/robertgrant/statacpp/raw/master/src/common/images/taxis.png)
+
+This is a 'big data' example, using [Chris Whong's taxi data](http://chriswhong.com/open-data/foil_nyc_taxi/), which is details of every taxi journey in New York city in 2013. Uncompressed, there are 12 trip_data files (one for each month) of about 2.5GB each, and 12 trip_fare files of about 1.6GB each. These are generally too big to open in Stata, and although you could flip through them line-by-line using `file read` commands, it is always going to be faster to do that in as low-level a language as you can stomach. Probably the biggest single selling point, though, is being able to parcel up the 12 months into 12 threads (executing the compiled program 12 times), making full use of multicore CPUs. In this test case ("statacpp-taxi-example.do"), I get all 170 million journeys and MapReduce their start locations (from GPS in the taxi meters) to counts on a latitude-longitude grid, then plot that in Stata. On an "early 2015" MacBook Pro, with quad-core 2.7GHz Intel core i5 CPU, 8GB of RAM, Stata 14.1/SE, OS X El Capitan, g++ and statacpp 0.2, I can do all this in 641 seconds = 11 minutes. Booya! If I do it by the comparator do-file "taxi-stata.do" method, it takes an hour to go through 300,000 lines of the January file (which has about 1,400,000 lines), so the whole process should take about 56 hours: 315 times longer!
+
+Example 2: artificial neural networks for classification
+========================================
+
+This is an example of utilising pre-existing libraries to do something specialised (you can tell your boss you are leveraging best-in-breed analytics, which sounds much better than plugging your data into someone else's program). Details coming next.
